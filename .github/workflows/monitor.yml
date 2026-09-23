@@ -2,13 +2,17 @@ name: Facebook Marketplace Monitor
 
 on:
   schedule:
-    # Runs once per hour, matching config.json's monitoring.interval_minutes.
-    # To change the frequency, edit this cron expression, e.g.:
-    #   "*/30 * * * *" -> every 30 minutes
-    #   "0 */2 * * *"  -> every 2 hours
+    # Every 15 minutes, but only 08:00-23:59 Belgium time (CEST = UTC+2) ->
+    # 06:00-21:45 UTC. No runs at all between local midnight and 08:00.
+    #
+    # ⚠️ Cron here is fixed in UTC and does NOT follow daylight saving time.
+    # Belgium switches to CET (UTC+1) in late October - shift both hour
+    # bounds below by -1 (e.g. "5-20") after that, and back by +1 in spring,
+    # if you want the same *local* 08:00-00:00 window year-round.
+    #
     # Each run calls the configured scraper_provider (Apify or Bright Data),
-    # which costs money - a more frequent schedule means more cost.
-    - cron: "0 * * * *"
+    # which costs money - this schedule runs ~64 times/day (16h x 4/hour).
+    - cron: "*/15 6-21 * * *"
   workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
 
 # Needed to let the "persist state" step below commit and push
