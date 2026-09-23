@@ -207,6 +207,45 @@ python main.py
 Le programme tourne en continu : il scanne, filtre, notifie, puis attend
 `monitoring.interval_minutes` avant de recommencer. Arrêtez-le avec `Ctrl+C`.
 
+### Mode "un seul cycle" (`RUN_ONCE`) — préparation pour GitHub Actions
+
+Pour un hébergement gratuit futur via GitHub Actions (scheduled workflow), le
+programme doit pouvoir exécuter **un seul scan puis se terminer** plutôt que
+tourner en boucle indéfiniment :
+
+- En local, sans rien configurer : comportement inchangé (boucle infinie).
+- `RUN_ONCE=true` dans `.env` : exécute exactement un scan puis quitte.
+- Sous GitHub Actions, c'est **automatique** : la variable `GITHUB_ACTIONS`
+  (positionnée par GitHub lui-même) déclenche le mode "un seul cycle" sans
+  rien configurer.
+- Code de sortie du processus : `0` si le scan a réussi, `1` s'il a échoué
+  (erreur du provider, Telegram, etc.) — un workflow GitHub Actions peut donc
+  détecter un échec directement via le statut du job.
+
+### Hébergement gratuit avec GitHub Actions
+
+Le workflow `.github/workflows/monitor.yml` exécute un scan planifié (par
+défaut toutes les heures - modifiable en éditant la ligne `cron:` du
+fichier) sans que vous n'ayez de machine à faire tourner en continu.
+
+**Mise en place :**
+
+1. Sur GitHub : **Settings → Secrets and variables → Actions → New repository
+   secret**, ajoutez : `APIFY_API_TOKEN`, `TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_CHAT_ID`, `BRIGHTDATA_API_KEY`, `DRY_RUN` (mettez `false` une
+   fois que vous êtes prêt à recevoir de vraies notifications).
+2. Poussez `.github/workflows/monitor.yml` sur GitHub (`git add`, `commit`,
+   `push`).
+3. Le workflow se déclenche automatiquement selon le planning défini, ou
+   manuellement via l'onglet **Actions → Facebook Marketplace Monitor → Run
+   workflow**.
+
+Chaque exécution fait exactement **un scan** (le mode `RUN_ONCE` s'active
+automatiquement sous GitHub Actions), puis **recommit automatiquement**
+`seen_listings.json` et `last_scan.json` dans le dépôt pour que l'état soit
+conservé d'une exécution à l'autre - sans ça, chaque run repartirait de zéro
+et vous recevriez les mêmes annonces en boucle.
+
 Tant que `DRY_RUN=true` dans `.env`, les annonces qui seraient envoyées sont
 seulement affichées dans le terminal (aucun message Telegram réel). Passez à
 `DRY_RUN=false` une fois que vous avez vérifié que tout fonctionne comme prévu.

@@ -1,6 +1,9 @@
 import unittest
+from unittest.mock import MagicMock, patch
 
-from apify_client import build_search_url, parse_apify_listing
+from apify_client import build_search_url, fetch_marketplace_listings, get_last_run_cost_usd, parse_apify_listing
+
+FAKE_TOKEN = "apify_api_SUPER-SECRET-TOKEN"
 
 
 class TestBuildSearchUrl(unittest.TestCase):
@@ -105,6 +108,64 @@ class TestParseApifyListingEdgeCases(unittest.TestCase):
     def test_item_without_id_is_skipped(self):
         raw = {"listingTitle": "No id here"}
         self.assertIsNone(parse_apify_listing(raw))
+
+
+class TestApifyTokenNeverInUrl(unittest.TestCase):
+    """The Apify token must be sent via the Authorization header, never as a
+    URL query parameter - so it can never leak into an exception message
+    built from the request URL (e.g. a network timeout).
+    """
+
+    CFG = {
+        "search": {"location_id": "1", "category": "vehicles"},
+        "apify": {"actor_id": "apify/facebook-marketplace-scraper"},
+    }
+
+    def test_fetch_marketplace_listings_sends_token_via_header_only(self):
+        response = MagicMock(status_code=200)
+        response.json.return_value = []
+        response.raise_for_status.return_value = None
+
+        with patch("apify_client.requests.post", return_value=response) as mock_post:
+            fetch_marketplace_listings(self.CFG, FAKE_TOKEN)
+
+        called_url = mock_post.call_args.args[0]
+        called_params = mock_post.call_args.kwargs.get("params", {})
+        called_headers = mock_post.call_args.kwargs.get("headers", {})
+
+        self.assertNotIn(FAKE_TOKEN, called_url)
+        self.assertNotIn(FAKE_TOKEN, str(called_params))
+        self.assertEqual(called_headers.get("Authorization"), f"Bearer {FAKE_TOKEN}")
+
+    def test_get_last_run_cost_usd_sends_token_via_header_only(self):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"data": {"items": [{"usageTotalUsd": 0.1}]}}
+        response.raise_for_status.return_value = None
+
+        with patch("apify_client.requests.get", return_value=response) as mock_get:
+            get_last_run_cost_usd(FAKE_TOKEN)
+
+        called_url = mock_get.call_args.args[0]
+        called_params = mock_get.call_args.kwargs.get("params", {})
+        called_headers = mock_get.call_args.kwargs.get("headers", {})
+
+        self.assertNotIn(FAKE_TOKEN, called_url)
+        self.assertNotIn(FAKE_TOKEN, str(called_params))
+        self.assertEqual(called_headers.get("Authorization"), f"Bearer {FAKE_TOKEN}")
+
+    def test_token_never_appears_in_exception_message(self):
+        """Simulates a network failure: the resulting exception must not
+        embed the token, since the URL/params it's built from never contain it.
+        """
+        import requests
+
+        with patch("apify_client.requests.post", side_effect=requests.ConnectionError("boom")):
+            try:
+                fetch_marketplace_listings(self.CFG, FAKE_TOKEN)
+            except requests.ConnectionError as exc:
+                self.assertNotIn(FAKE_TOKEN, str(exc))
+            else:
+                self.fail("Expected a ConnectionError to propagate")
 
 
 if __name__ == "__main__":

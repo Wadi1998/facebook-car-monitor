@@ -23,6 +23,17 @@ def _actor_rest_id(actor_id: str) -> str:
     return actor_id.replace("/", "~")
 
 
+def _auth_headers(api_token: str) -> dict:
+    """Apify accepts the token either as a `?token=` URL query param or as an
+    `Authorization: Bearer` header - Apify's own docs recommend the header,
+    since URLs (unlike headers) tend to end up in logs, browser history, and
+    exception messages. Using the header keeps the token out of every URL
+    this module builds, and therefore out of any error message derived from
+    that URL (e.g. a network timeout exception).
+    """
+    return {"Authorization": f"Bearer {api_token}"}
+
+
 def build_search_url(search_config: dict) -> str:
     """Build a Facebook Marketplace category URL for the configured location.
 
@@ -79,7 +90,7 @@ def fetch_marketplace_listings(config: dict, api_token: str) -> List[CarListing]
     # run-sync-get-dataset-items query param), independent of anything the
     # Actor does. This is a safety net, not a behavior change: if unset, no
     # cap is sent and nothing changes from before.
-    query_params = {"token": api_token}
+    query_params = {}
     max_total_charge_usd = apify_config.get("max_total_charge_usd")
     if max_total_charge_usd is not None:
         query_params["maxTotalChargeUsd"] = max_total_charge_usd
@@ -87,6 +98,7 @@ def fetch_marketplace_listings(config: dict, api_token: str) -> List[CarListing]
     response = requests.post(
         f"{APIFY_API_BASE}/acts/{actor_id}/run-sync-get-dataset-items",
         params=query_params,
+        headers=_auth_headers(api_token),
         json=payload,
         timeout=apify_config.get("timeout_seconds", 180),
     )
@@ -234,7 +246,8 @@ def get_last_run_cost_usd(api_token: str) -> Optional[float]:
     try:
         response = requests.get(
             f"{APIFY_API_BASE}/actor-runs",
-            params={"token": api_token, "limit": 1, "desc": "true"},
+            params={"limit": 1, "desc": "true"},
+            headers=_auth_headers(api_token),
             timeout=15,
         )
         response.raise_for_status()

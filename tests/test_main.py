@@ -1,4 +1,6 @@
+import io
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import MagicMock, patch
 
 import main
@@ -191,6 +193,150 @@ class TestSinceLastScanCutoff(unittest.TestCase):
         )
 
         result["mock_send"].assert_called_once()
+
+
+class TestLogsShowProviderAndCounts(unittest.TestCase):
+    """Every cycle must clearly show which provider ran and every count
+    requested (retrieved, price-filtered, duplicates, already-seen, new,
+    notifications sent, cost) - even when a count is zero, it must be shown
+    explicitly rather than omitted.
+    """
+
+    def test_provider_name_is_logged(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            run_cycle_with_mocks([], dry_run=True)
+        self.assertIn("[SCRAPER] Provider: apify", buffer.getvalue())
+
+    def test_zero_counts_are_logged_explicitly(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            run_cycle_with_mocks([], dry_run=True)
+        output = buffer.getvalue()
+        self.assertIn("Scraper returned 0 listings", output)
+        self.assertIn("0 duplicate listings removed from this batch", output)
+        self.assertIn("0 listings passed price filter", output)
+        self.assertIn("0 listings already seen, skipped", output)
+        self.assertIn("0 new listings detected", output)
+        self.assertIn("0 Telegram notifications sent", output)
+
+    def test_cost_shown_as_unknown_when_provider_cant_report_it(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            run_cycle_with_mocks([], dry_run=True)
+        self.assertIn("cost: unknown", buffer.getvalue())
+
+
+class TestNoFallbackBetweenProviders(unittest.TestCase):
+    """Exactly one provider must ever be called per cycle. If it fails, the
+    other provider must never be tried, no listing may be marked seen, and
+    the cycle must end by propagating the error (so RUN_ONCE/CI can detect
+    the failure via the process exit code).
+    """
+
+    def test_apify_failure_never_calls_brightdata_or_marks_seen(self):
+        cfg = {
+            **CFG,
+            "scraper_provider": "apify",
+            "apify": {"actor_id": "apify/facebook-marketplace-scraper"},
+            "search": {"location_id": "1", "category": "vehicles"},
+        }
+        buffer = io.StringIO()
+        with patch("apify_client.fetch_marketplace_listings", side_effect=RuntimeError("HTTP 500")) as mock_apify, \
+             patch("brightdata_client.fetch_marketplace_listings") as mock_brightdata, \
+             patch("main.mark_seen") as mock_mark_seen, \
+             patch("main.save_seen") as mock_save_seen, \
+             redirect_stdout(buffer):
+            with self.assertRaises(RuntimeError):
+                main.run_cycle(cfg, dry_run=False)
+
+        mock_apify.assert_called_once()
+        mock_brightdata.assert_not_called()
+        mock_mark_seen.assert_not_called()
+        mock_save_seen.assert_not_called()
+
+        output = buffer.getvalue()
+        self.assertIn("[SCRAPER] Provider: apify", output)
+        self.assertIn("[ERROR] Apify API failed", output)
+        self.assertIn("no fallback provider configured", output)
+
+    def test_brightdata_failure_never_calls_apify_or_marks_seen(self):
+        cfg = {
+            **CFG,
+            "scraper_provider": "brightdata",
+            "brightdata": {},
+            "search": {"location_id": "1", "category": "vehicles"},
+        }
+        buffer = io.StringIO()
+        with patch("brightdata_client.fetch_marketplace_listings", side_effect=RuntimeError("HTTP 500")) as mock_bd, \
+             patch("apify_client.fetch_marketplace_listings") as mock_apify, \
+             patch("main.mark_seen") as mock_mark_seen, \
+             patch("main.save_seen") as mock_save_seen, \
+             redirect_stdout(buffer):
+            with self.assertRaises(RuntimeError):
+                main.run_cycle(cfg, dry_run=False)
+
+        mock_bd.assert_called_once()
+        mock_apify.assert_not_called()
+        mock_mark_seen.assert_not_called()
+        mock_save_seen.assert_not_called()
+
+        output = buffer.getvalue()
+        self.assertIn("[SCRAPER] Provider: brightdata", output)
+        self.assertIn("[ERROR] Brightdata API failed", output)
+        self.assertIn("no fallback provider configured", output)
+
+
+class TestRunOnceMode(unittest.TestCase):
+    """RUN_ONCE/GitHub Actions mode must run exactly one cycle, never loop,
+    never call time.sleep(), and report success/failure via the return value
+    (used as the process exit code via sys.exit(main())).
+    """
+
+    def _base_cfg(self):
+        return {
+            "scraper_provider": "apify",
+            "apify": {"include_listing_details": True},
+            "monitoring": {"interval_minutes": 60},
+        }
+
+    def test_success_returns_zero_and_never_sleeps(self):
+        with patch("config.load_config", return_value=self._base_cfg()), \
+             patch("config.is_dry_run", return_value=True), \
+             patch("config.is_run_once", return_value=True), \
+             patch("main.run_cycle") as mock_run_cycle, \
+             patch("main.time.sleep") as mock_sleep:
+            exit_code = main.main()
+
+        mock_run_cycle.assert_called_once()
+        mock_sleep.assert_not_called()
+        self.assertEqual(exit_code, 0)
+
+    def test_failure_returns_nonzero_and_never_sleeps(self):
+        with patch("config.load_config", return_value=self._base_cfg()), \
+             patch("config.is_dry_run", return_value=True), \
+             patch("config.is_run_once", return_value=True), \
+             patch("main.run_cycle", side_effect=RuntimeError("boom")), \
+             patch("main.time.sleep") as mock_sleep:
+            exit_code = main.main()
+
+        mock_sleep.assert_not_called()
+        self.assertNotEqual(exit_code, 0)
+
+    def test_loop_mode_used_when_run_once_is_false(self):
+        # Loop mode: run_cycle then sleep, repeat. We stop the (otherwise
+        # infinite) loop after one iteration with a BaseException, which
+        # main()'s `except Exception` does not swallow.
+        with patch("config.load_config", return_value=self._base_cfg()), \
+             patch("config.is_dry_run", return_value=True), \
+             patch("config.is_run_once", return_value=False), \
+             patch("main.run_cycle", side_effect=[None, KeyboardInterrupt]) as mock_run_cycle, \
+             patch("main.time.sleep") as mock_sleep:
+            with self.assertRaises(KeyboardInterrupt):
+                main.main()
+
+        self.assertEqual(mock_run_cycle.call_count, 2)
+        mock_sleep.assert_called_once()
 
 
 if __name__ == "__main__":

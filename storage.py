@@ -26,8 +26,16 @@ def load_seen(path: Path = SEEN_LISTINGS_PATH) -> Dict[str, dict]:
 
 
 def save_seen(seen: Dict[str, dict], path: Path = SEEN_LISTINGS_PATH) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(seen, f, indent=2, ensure_ascii=False)
+    """Persist the seen-listings state. Never raises: a write failure (full
+    disk, permissions, ...) is logged clearly instead of crashing the cycle -
+    the in-memory dedup for this run already happened, so this only affects
+    whether *future* cycles remember it.
+    """
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(seen, f, indent=2, ensure_ascii=False)
+    except OSError as exc:
+        print(f"[ERROR] Failed to write {path}: {exc}")
 
 
 def is_seen(listing: CarListing, seen: Dict[str, dict]) -> bool:
@@ -56,8 +64,14 @@ def load_last_scan_at(path: Path = LAST_SCAN_PATH) -> Optional[str]:
 
 
 def save_last_scan_at(timestamp_iso: str, path: Path = LAST_SCAN_PATH) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump({"last_scan_at": timestamp_iso}, f, indent=2)
+    """Persist the last-scan cursor. Never raises - see save_seen() above for
+    why a write failure is logged rather than allowed to crash the cycle.
+    """
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"last_scan_at": timestamp_iso}, f, indent=2)
+    except OSError as exc:
+        print(f"[ERROR] Failed to write {path}: {exc}")
 
 
 def dedupe_listings(listings: List[CarListing]) -> List[CarListing]:

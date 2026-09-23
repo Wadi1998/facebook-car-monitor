@@ -1,0 +1,60 @@
+name: Facebook Marketplace Monitor
+
+on:
+  schedule:
+    # Runs once per hour, matching config.json's monitoring.interval_minutes.
+    # To change the frequency, edit this cron expression, e.g.:
+    #   "*/30 * * * *" -> every 30 minutes
+    #   "0 */2 * * *"  -> every 2 hours
+    # Each run calls the configured scraper_provider (Apify or Bright Data),
+    # which costs money - a more frequent schedule means more cost.
+    - cron: "0 * * * *"
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
+
+# Needed to let the "persist state" step below commit and push
+# seen_listings.json / last_scan.json back to the repository.
+permissions:
+  contents: write
+
+concurrency:
+  # Prevents two scans from running at once (e.g. a scheduled run overlapping
+  # with a manual workflow_dispatch run) - a second run would read a stale
+  # seen_listings.json and could double-notify.
+  group: facebook-car-monitor
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run one monitoring cycle
+        env:
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BRIGHTDATA_API_KEY: ${{ secrets.BRIGHTDATA_API_KEY }}
+          DRY_RUN: ${{ secrets.DRY_RUN }}
+        run: python main.py
+        # RUN_ONCE is not set here on purpose: main.py auto-detects the
+        # GITHUB_ACTIONS environment variable (set by GitHub itself) and
+        # runs exactly one cycle, then exits with the process's real exit
+        # code (0 success / 1 failure) so this step - and the whole job -
+        # is correctly reported as failed if the scan failed.
+
+      - name: Persist seen_listings.json / last_scan.json
+        if: always()
+        run: |
+          git config user.name "facebook-car-monitor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add seen_listings.json last_scan.json
+          git diff --cached --quiet || git commit -m "chore: update monitor state [skip ci]"
+          git push

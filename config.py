@@ -29,6 +29,16 @@ def is_dry_run() -> bool:
     return get_env("DRY_RUN", "true").strip().lower() in ("1", "true", "yes")
 
 
+def is_run_once() -> bool:
+    """True if the program should execute exactly one monitoring cycle and
+    exit, instead of looping forever. Set explicitly via RUN_ONCE=true, or
+    implied automatically by GITHUB_ACTIONS (set by GitHub Actions itself on
+    every run) so a workflow doesn't need to remember to set RUN_ONCE too.
+    """
+    explicit = get_env("RUN_ONCE", "false").strip().lower() in ("1", "true", "yes")
+    return explicit or bool(get_env("GITHUB_ACTIONS"))
+
+
 # Convenience accessors for secrets used across the app.
 APIFY_API_TOKEN = get_env("APIFY_API_TOKEN")
 TELEGRAM_BOT_TOKEN = get_env("TELEGRAM_BOT_TOKEN")

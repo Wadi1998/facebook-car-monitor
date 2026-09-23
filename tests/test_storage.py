@@ -1,6 +1,9 @@
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from models import CarListing
 from storage import (
@@ -104,6 +107,34 @@ class TestLastScanCursor(unittest.TestCase):
             path = Path(tmp) / "last_scan.json"
             save_last_scan_at("2026-09-23T21:00:00+00:00", path=path)
             self.assertEqual(load_last_scan_at(path=path), "2026-09-23T21:00:00+00:00")
+
+
+class TestResilientWrites(unittest.TestCase):
+    """A write failure (full disk, permissions, ...) must be logged clearly,
+    never allowed to crash the cycle - the next cycle should still get a
+    chance to run.
+    """
+
+    def test_save_seen_does_not_raise_on_write_failure(self):
+        bad_path = Path("/this/path/does/not/exist/seen_listings.json")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            save_seen({"123": {"first_seen": "now", "url": "x"}}, path=bad_path)
+        self.assertIn("[ERROR]", buffer.getvalue())
+
+    def test_save_last_scan_at_does_not_raise_on_write_failure(self):
+        bad_path = Path("/this/path/does/not/exist/last_scan.json")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            save_last_scan_at("2026-09-23T21:00:00+00:00", path=bad_path)
+        self.assertIn("[ERROR]", buffer.getvalue())
+
+    def test_save_seen_logs_and_swallows_generic_os_error(self):
+        buffer = io.StringIO()
+        with patch("storage.open", side_effect=OSError("disk full")), redirect_stdout(buffer):
+            save_seen({}, path=Path("irrelevant.json"))
+        self.assertIn("[ERROR]", buffer.getvalue())
+        self.assertIn("disk full", buffer.getvalue())
 
 
 if __name__ == "__main__":
