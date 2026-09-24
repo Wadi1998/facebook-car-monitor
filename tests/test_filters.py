@@ -1,6 +1,6 @@
 import unittest
 
-from filters import parse_mileage, parse_price, parse_year, passes_filters
+from filters import is_likely_non_vehicle, parse_mileage, parse_price, parse_year, passes_filters
 from models import CarListing
 
 
@@ -122,6 +122,49 @@ class TestPassesFilters(unittest.TestCase):
 
     def test_listing_without_mileage_is_accepted(self):
         listing = make_listing(price=1000, mileage=None)
+        self.assertTrue(passes_filters(listing, self.filter_config))
+
+
+class TestIsLikelyNonVehicle(unittest.TestCase):
+    """Best-effort, conservative check used to filter out obvious non-vehicle
+    noise from a keyword-based Marketplace search (real example that leaked
+    through: a pressure washer). Must never flag a real, unusually-titled
+    vehicle as non-vehicle - only clear, known junk categories are rejected.
+    """
+
+    def test_flags_known_non_vehicle_item(self):
+        self.assertTrue(is_likely_non_vehicle("NETOYEUR HAUTE PRESSION THERMIQUE"))
+
+    def test_flags_is_case_insensitive(self):
+        self.assertTrue(is_likely_non_vehicle("canapé 3 places comme neuf"))
+
+    def test_does_not_flag_a_real_car(self):
+        self.assertFalse(is_likely_non_vehicle("Opel corsa 62.000km garantie 1 ans"))
+
+    def test_does_not_flag_unusual_but_real_vehicle_titles(self):
+        self.assertFalse(is_likely_non_vehicle("Voiture propre 👍🏻"))
+        self.assertFalse(is_likely_non_vehicle("Golf"))
+
+    def test_missing_title_is_not_flagged(self):
+        self.assertFalse(is_likely_non_vehicle(None))
+        self.assertFalse(is_likely_non_vehicle(""))
+
+
+class TestPassesFiltersExcludesNonVehicleKeywords(unittest.TestCase):
+    def setUp(self):
+        self.filter_config = {"min_price": 100, "max_price": 4000}
+
+    def test_non_vehicle_title_is_rejected_by_default(self):
+        listing = make_listing(price=750, title="NETOYEUR HAUTE PRESSION THERMIQUE")
+        self.assertFalse(passes_filters(listing, self.filter_config))
+
+    def test_can_be_disabled_via_config(self):
+        listing = make_listing(price=750, title="NETOYEUR HAUTE PRESSION THERMIQUE")
+        cfg = {**self.filter_config, "exclude_non_vehicle_keywords": False}
+        self.assertTrue(passes_filters(listing, cfg))
+
+    def test_real_vehicle_title_still_passes(self):
+        listing = make_listing(price=2500, title="Opel corsa 62.000km garantie 1 ans")
         self.assertTrue(passes_filters(listing, self.filter_config))
 
 

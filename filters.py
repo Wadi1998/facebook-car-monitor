@@ -21,6 +21,33 @@ _MILEAGE_RE = re.compile(r"(\d[\d\s.,]{2,})\s*km", re.IGNORECASE)
 # an optional currency symbol, e.g. "15 000 €", "15,000", "€15000".
 _PRICE_RE = re.compile(r"[\d][\d\s.,]*")
 
+# A keyword-based Marketplace *search* (e.g. query="Véhicules") returns more
+# listings than the strict category page, but occasionally picks up clearly
+# unrelated items (observed real example: a pressure washer). This is a
+# best-effort, deliberately conservative blacklist of common non-vehicle
+# categories - it only rejects listings that CLEARLY match one of these, so a
+# real vehicle with an unusual title is never wrongly excluded (matches every
+# other "never invent/never wrongly reject" rule in this project).
+_NON_VEHICLE_KEYWORDS = [
+    "nettoyeur", "netoyeur", "haute pression", "aspirateur", "frigo", "réfrigérateur", "congélateur",
+    "canapé", "fauteuil", "armoire", "matelas", "lit ", "table basse",
+    "télé", "televisie", "ordinateur", "gsm", "smartphone", "meuble",
+    "lave-linge", "lave-vaisselle", "cuisinière", "four ", "tondeuse",
+    "perceuse", "outillage", "jouet", "vêtement", "chaussure", "poussette",
+]
+
+
+def is_likely_non_vehicle(title) -> bool:
+    """True only when the title clearly matches a common non-vehicle
+    Marketplace category. Never invents a "yes it's a vehicle" answer either
+    way: an unknown/ambiguous title is NOT flagged (returns False), so it's
+    kept rather than risk excluding a real vehicle listing.
+    """
+    if not title:
+        return False
+    lowered = str(title).lower()
+    return any(keyword in lowered for keyword in _NON_VEHICLE_KEYWORDS)
+
 
 def parse_price(value) -> Optional[float]:
     """Parse a price from a number, numeric string, or formatted string like
@@ -95,6 +122,11 @@ def passes_filters(listing: CarListing, filter_config: dict) -> bool:
 
     If the price is missing or could not be parsed, the listing is always
     rejected: we never guess whether an unpriced listing would have matched.
+
+    The only other check is an opt-in, conservative anti-noise filter
+    (`exclude_non_vehicle_keywords`, default True) needed because a
+    keyword-based Marketplace search (search.query in config.json) can
+    occasionally return clearly-unrelated items - see is_likely_non_vehicle().
     """
     if listing.price is None:
         return False
@@ -105,6 +137,9 @@ def passes_filters(listing: CarListing, filter_config: dict) -> bool:
 
     max_price = filter_config.get("max_price")
     if max_price is not None and listing.price > max_price:
+        return False
+
+    if filter_config.get("exclude_non_vehicle_keywords", True) and is_likely_non_vehicle(listing.title):
         return False
 
     return True

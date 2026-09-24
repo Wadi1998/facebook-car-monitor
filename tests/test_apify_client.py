@@ -43,6 +43,29 @@ class TestBuildSearchUrl(unittest.TestCase):
         url = build_search_url({"custom_url": "", "location_id": "1"})
         self.assertTrue(url.startswith("https://www.facebook.com/marketplace/1/vehicles"))
 
+    def test_query_builds_search_url_instead_of_category_page(self):
+        url = build_search_url({
+            "location_id": "112128398804880",
+            "query": "Véhicules",
+            "category_id": "546583916084032",
+            "radius_km": 150,
+            "days_since_listed": 1,
+        })
+        self.assertTrue(url.startswith("https://www.facebook.com/marketplace/112128398804880/search/?"))
+        self.assertIn("query=V%C3%A9hicules", url)
+        self.assertIn("category_id=546583916084032", url)
+        self.assertIn("radius=150", url)
+        self.assertIn("daysSinceListed=1", url)
+
+    def test_query_without_category_id_still_works(self):
+        url = build_search_url({"location_id": "1", "query": "voiture"})
+        self.assertIn("query=voiture", url)
+        self.assertNotIn("category_id", url)
+
+    def test_no_query_uses_category_page_as_before(self):
+        url = build_search_url({"location_id": "1", "query": ""})
+        self.assertTrue(url.startswith("https://www.facebook.com/marketplace/1/vehicles"))
+
 
 class TestParseApifyListingDetailsOn(unittest.TestCase):
     """Shape actually observed in our validated run (includeListingDetails=true)."""
@@ -108,6 +131,50 @@ class TestParseApifyListingEdgeCases(unittest.TestCase):
     def test_item_without_id_is_skipped(self):
         raw = {"listingTitle": "No id here"}
         self.assertIsNone(parse_apify_listing(raw))
+
+
+class TestApifyWarnsAboutIncompatibleQuerySearch(unittest.TestCase):
+    """/search (used when search.query is set) doesn't work anonymously with
+    the Apify Actor - using it together with scraper_provider=apify should be
+    flagged loudly rather than silently returning nothing.
+    """
+
+    def test_warns_when_query_set_without_custom_url(self):
+        import io
+        from contextlib import redirect_stdout
+
+        cfg = {
+            "search": {"location_id": "1", "query": "Véhicules"},
+            "apify": {"actor_id": "x"},
+        }
+        response = MagicMock(status_code=200)
+        response.json.return_value = []
+        response.raise_for_status.return_value = None
+
+        buffer = io.StringIO()
+        with patch("apify_client.requests.post", return_value=response), redirect_stdout(buffer):
+            fetch_marketplace_listings(cfg, FAKE_TOKEN)
+
+        self.assertIn("[WARN]", buffer.getvalue())
+        self.assertIn("search.query", buffer.getvalue())
+
+    def test_no_warning_when_query_not_set(self):
+        import io
+        from contextlib import redirect_stdout
+
+        cfg = {
+            "search": {"location_id": "1"},
+            "apify": {"actor_id": "x"},
+        }
+        response = MagicMock(status_code=200)
+        response.json.return_value = []
+        response.raise_for_status.return_value = None
+
+        buffer = io.StringIO()
+        with patch("apify_client.requests.post", return_value=response), redirect_stdout(buffer):
+            fetch_marketplace_listings(cfg, FAKE_TOKEN)
+
+        self.assertNotIn("search.query", buffer.getvalue())
 
 
 class TestResultsLimit(unittest.TestCase):

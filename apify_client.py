@@ -35,29 +35,55 @@ def _auth_headers(api_token: str) -> dict:
 
 
 def build_search_url(search_config: dict) -> str:
-    """Build a Facebook Marketplace category URL for the configured location.
+    """Build a Facebook Marketplace URL for the configured location.
 
-    Uses the category *browse* page (e.g. /marketplace/<id>/vehicles) rather
-    than the /search endpoint, because /search requires a logged-in session
-    and returns no results anonymously (verified manually against the Actor).
+    Two shapes, selected by whether search_config["query"] is set:
+
+    - No query (default): the category *browse* page
+      (/marketplace/<id>/vehicles). Validated to work anonymously with both
+      Apify and Bright Data.
+    - With query: the /search page with a keyword (e.g. query="Véhicules"),
+      optionally scoped further with category_id. This returns MORE listings
+      than the plain category page (some listings aren't cleanly tagged into
+      Facebook's own "vehicles" category and are invisible to the browse page
+      even to a logged-in user browsing by category) - validated with real
+      data against Bright Data on 2026-09-24.
+      ⚠️ /search does NOT work anonymously with the Apify Actor (returns no
+      results - it needs a logged-in session there). Only set "query" when
+      scraper_provider is "brightdata".
 
     If search_config["custom_url"] is set, it's used as-is instead of being
     built from the other fields below - this is the escape hatch for trying
-    things (keywords, a different category, extra Facebook query params like
-    minPrice/maxPrice) without touching any code. Everything else in this
-    function only kicks in when custom_url is absent/empty.
+    things without touching any code. Everything else in this function only
+    kicks in when custom_url is absent/empty.
     """
     custom_url = search_config.get("custom_url")
     if custom_url:
         return custom_url
 
     location_id = search_config["location_id"]
-    category = search_config.get("category", "vehicles")
     radius_km = search_config.get("radius_km", 150)
     days_since_listed = search_config.get("days_since_listed", 1)
     sort_by = search_config.get("sort_by", "creation_time_descend")
     exact = search_config.get("exact", False)
+    query = search_config.get("query")
 
+    if query:
+        from urllib.parse import quote
+
+        params = [
+            f"daysSinceListed={days_since_listed}",
+            f"sortBy={sort_by}",
+            f"query={quote(query)}",
+            f"exact={'true' if exact else 'false'}",
+            f"radius={radius_km}",
+        ]
+        category_id = search_config.get("category_id")
+        if category_id:
+            params.append(f"category_id={category_id}")
+        return f"https://www.facebook.com/marketplace/{location_id}/search/?" + "&".join(params)
+
+    category = search_config.get("category", "vehicles")
     return (
         f"https://www.facebook.com/marketplace/{location_id}/{category}"
         f"?daysSinceListed={days_since_listed}"
@@ -76,6 +102,16 @@ def fetch_marketplace_listings(config: dict, api_token: str) -> List[CarListing]
     """
     apify_config = config["apify"]
     search_config = config["search"]
+
+    if search_config.get("query") and not search_config.get("custom_url"):
+        # /search (used when "query" is set) was verified NOT to work
+        # anonymously with this Actor - it needs a logged-in session and
+        # returns no results. Only Bright Data was validated to handle it.
+        print(
+            "[WARN] search.query is set but this run uses the Apify provider: "
+            "/search returns no results anonymously with this Actor. "
+            "Remove search.query (or set scraper_provider to brightdata)."
+        )
 
     actor_id = _actor_rest_id(apify_config["actor_id"])
     search_url = build_search_url(search_config)

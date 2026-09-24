@@ -157,9 +157,48 @@ les autres champs `search.*` seront ignorés :
 ```
 
 ⚠️ Seule l'URL de **catégorie** (`/marketplace/<id>/vehicles`) a été validée
-comme fonctionnant en anonyme avec cet Actor. L'URL `/search?query=...`
-retourne vide (nécessite une session connectée) — voir "Limites connues"
-ci-dessous.
+comme fonctionnant en anonyme avec l'Actor **Apify**. L'URL `/search?query=...`
+retourne vide avec Apify (nécessite une session connectée).
+
+### Recherche par mot-clé (`search.query`) — Bright Data uniquement
+
+Contrairement à Apify, **Bright Data supporte `/search` en anonyme** — validé
+avec des données réelles le 2026-09-24. Renseigner `search.query` (et
+optionnellement `search.category_id`) fait basculer `build_search_url()` vers
+`/marketplace/<id>/search/?query=...` au lieu de la page de catégorie :
+
+```json
+{
+  "search": {
+    "query": "Véhicules",
+    "category_id": "546583916084032"
+  }
+}
+```
+
+**Pourquoi** : certaines annonces ne sont pas correctement rangées par
+Facebook dans sa catégorie "Véhicules" et sont donc invisibles à la page de
+catégorie stricte, même pour un utilisateur connecté qui filtrerait par
+catégorie. La recherche par mot-clé les capture en plus.
+
+**Contrepartie** : étant une recherche texte libre et non un filtre de
+catégorie strict, elle peut occasionnellement remonter des objets non liés
+aux véhicules (ex. observé réellement : un nettoyeur haute pression). C'est
+géré par `filters.exclude_non_vehicle_keywords` (voir plus bas), un filtre
+volontairement conservateur qui ne rejette que les titres correspondant
+clairement à une catégorie connue non-véhicule, jamais une vraie annonce
+juste parce que son titre est inhabituel.
+
+⚠️ Ne configurez `search.query` que si `scraper_provider` est `"brightdata"`.
+Avec `"apify"`, `fetch_marketplace_listings()` affiche un `[WARN]` explicite
+si `query` est défini, car l'Actor Apify renverrait silencieusement 0 résultat.
+
+⚠️ **Limite fondamentale, quelle que soit l'URL utilisée** : un scraper
+anonyme (sans connexion) verra toujours moins d'annonces qu'un compte
+Facebook connecté (contenu personnalisé, algorithme, restrictions
+anti-scraping). Ce n'est pas un bug corrigible côté code — voir la discussion
+dans l'historique du projet. Se connecter avec un vrai compte pour scraper
+violerait les CGU de Facebook et n'est pas une option supportée ici.
 
 ### Contrôle des coûts Apify
 
@@ -194,10 +233,19 @@ connus, mais jamais utilisés pour rejeter une annonce) :
 {
   "filters": {
     "min_price": 100,
-    "max_price": 4000
+    "max_price": 4000,
+    "exclude_non_vehicle_keywords": true
   }
 }
 ```
+
+`exclude_non_vehicle_keywords` (défaut `true`) : filtre anti-bruit conservateur
+utile surtout avec `search.query` (voir plus haut) — rejette un titre s'il
+correspond clairement à une catégorie connue non-véhicule (nettoyeur,
+aspirateur, meuble, électroménager...). Ne rejette jamais une vraie annonce
+juste parce que son titre est inhabituel ou ne contient aucun mot-clé
+reconnu. Passez à `false` pour désactiver entièrement. Voir
+`filters.is_likely_non_vehicle()` et `tests/test_filters.py`.
 
 Si le prix d'une annonce est absent ou impossible à parser, elle est toujours
 rejetée (on ne devine jamais un prix).

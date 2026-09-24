@@ -5,6 +5,8 @@
     "location_name": "Liege, Belgium",
     "location_id": "112128398804880",
     "category": "vehicles",
+    "query": "Véhicules",
+    "category_id": "546583916084032",
     "radius_km": 150,
     "days_since_listed": 1,
     "sort_by": "creation_time_descend",
@@ -12,7 +14,8 @@
   },
   "filters": {
     "min_price": 100,
-    "max_price": 4000
+    "max_price": 4000,
+    "exclude_non_vehicle_keywords": true
   },
   "monitoring": {
     "interval_minutes": 60
