@@ -163,13 +163,17 @@ ci-dessous.
 
 ### Contrôle des coûts Apify
 
-- `include_listing_details: false` (défaut actuel) désactive l'add-on payant
-  "Listing details" (~50% d'économie par scan). Contrepartie : le champ de
-  date de publication (`timestamp`) n'est plus renvoyé par l'Actor, donc la
-  double vérification de récence côté Python est désactivée (on se fie
-  uniquement au filtre `daysSinceListed` appliqué côté Facebook/Apify). Le
-  parseur gère les deux formats de champs (avec/sans détails) — voir les
-  tests dans `tests/test_apify_client.py`.
+- `results_limit: null` (défaut actuel, pour Apify comme pour Bright Data) =
+  **aucun plafond** : toutes les annonces disponibles sont récupérées, puis
+  filtrées côté Python. Mettez un nombre (ex: `40`) pour replafonner si vous
+  voulez limiter le coût par scan plutôt que de tout récupérer.
+- `include_listing_details: true` (défaut actuel) active l'add-on payant
+  "Listing details" (~2x le coût par annonce), nécessaire pour obtenir la
+  date de publication (`timestamp`), utilisée pour le tri chronologique et le
+  filtre "depuis le dernier scan". Passez à `false` pour diviser ce coût par
+  ~2, au prix de la perte de cette date exacte (voir plus haut). Le parseur
+  gère les deux formats de champs (avec/sans détails) — voir les tests dans
+  `tests/test_apify_client.py`.
 - `max_total_charge_usd` plafonne la dépense d'un run côté Apify (paramètre
   officiel de l'API), indépendamment de tout bug éventuel côté Actor.
 - Le prix n'est **pas** filtrable directement dans l'input de l'Actor (son

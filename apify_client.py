@@ -82,9 +82,14 @@ def fetch_marketplace_listings(config: dict, api_token: str) -> List[CarListing]
 
     payload = {
         "startUrls": [{"url": search_url}],
-        "resultsLimit": apify_config.get("results_limit", 40),
         "includeListingDetails": apify_config.get("include_listing_details", True),
     }
+    results_limit = apify_config.get("results_limit", 40)
+    if results_limit is not None:
+        payload["resultsLimit"] = results_limit
+    # If results_limit is None (config.json: "results_limit": null), the key
+    # is omitted entirely - per Apify's own docs, "if this limit is not set,
+    # as many results as possible will be returned", i.e. no artificial cap.
 
     # Optional hard spending cap enforced by Apify itself (documented
     # run-sync-get-dataset-items query param), independent of anything the

@@ -110,6 +110,42 @@ class TestParseApifyListingEdgeCases(unittest.TestCase):
         self.assertIsNone(parse_apify_listing(raw))
 
 
+class TestResultsLimit(unittest.TestCase):
+    """results_limit: null in config.json means "no cap" - fetch everything
+    available, then filter in Python - per explicit user request.
+    """
+
+    BASE_CFG = {
+        "search": {"location_id": "1", "category": "vehicles"},
+    }
+
+    def _run(self, results_limit):
+        cfg = {**self.BASE_CFG, "apify": {"actor_id": "x", "results_limit": results_limit}}
+        response = MagicMock(status_code=200)
+        response.json.return_value = []
+        response.raise_for_status.return_value = None
+        with patch("apify_client.requests.post", return_value=response) as mock_post:
+            fetch_marketplace_listings(cfg, FAKE_TOKEN)
+        return mock_post.call_args.kwargs["json"]
+
+    def test_no_resultslimit_sent_when_configured_as_null(self):
+        payload = self._run(None)
+        self.assertNotIn("resultsLimit", payload)
+
+    def test_resultslimit_sent_when_configured_with_a_number(self):
+        payload = self._run(15)
+        self.assertEqual(payload["resultsLimit"], 15)
+
+    def test_defaults_to_40_when_key_is_entirely_absent(self):
+        cfg = {**self.BASE_CFG, "apify": {"actor_id": "x"}}  # no "results_limit" key at all
+        response = MagicMock(status_code=200)
+        response.json.return_value = []
+        response.raise_for_status.return_value = None
+        with patch("apify_client.requests.post", return_value=response) as mock_post:
+            fetch_marketplace_listings(cfg, FAKE_TOKEN)
+        self.assertEqual(mock_post.call_args.kwargs["json"]["resultsLimit"], 40)
+
+
 class TestApifyTokenNeverInUrl(unittest.TestCase):
     """The Apify token must be sent via the Authorization header, never as a
     URL query parameter - so it can never leak into an exception message

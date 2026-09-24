@@ -22,7 +22,7 @@
   },
   "apify": {
     "actor_id": "apify/facebook-marketplace-scraper",
-    "results_limit": 40,
+    "results_limit": null,
     "include_listing_details": true,
     "timeout_seconds": 180,
     "max_total_charge_usd": 0.5
@@ -30,7 +30,7 @@
   "brightdata": {
     "dataset_id": "gd_lvt9iwuh6fbcwmx1a",
     "country": "BE",
-    "results_limit": 40,
+    "results_limit": null,
     "timeout_seconds": 180
   }
 }
