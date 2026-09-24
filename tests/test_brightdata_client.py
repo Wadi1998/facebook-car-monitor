@@ -234,5 +234,56 @@ class TestFetchMarketplaceListingsEndToEnd(unittest.TestCase):
         self.assertEqual(sent_payload["input"][0]["country"], "BE")
 
 
+class TestFetchMarketplaceListingsCombinesCategoryAndSearch(unittest.TestCase):
+    """When search.query is set, both the category page and the keyword
+    search are queried and their results merged - they don't return
+    identical listing sets (real example: a listing missed entirely by the
+    category page, found via /search).
+    """
+
+    def _config(self):
+        return {
+            "search": {
+                "location_id": "112128398804880",
+                "category": "vehicles",
+                "query": "Véhicules",
+            },
+            "brightdata": {},
+        }
+
+    def test_queries_both_urls_and_merges_results(self):
+        category_response = MagicMock(status_code=200)
+        category_response.text = '{"product_id": "1", "title": "Golf", "final_price": 1500, "url": "https://x/1"}\n'
+        category_response.raise_for_status.return_value = None
+
+        search_response = MagicMock(status_code=200)
+        search_response.text = '{"product_id": "2", "title": "Clio", "final_price": 900, "url": "https://x/2"}\n'
+        search_response.raise_for_status.return_value = None
+
+        with patch(
+            "brightdata_client.requests.post", side_effect=[category_response, search_response]
+        ) as mock_post:
+            listings = fetch_marketplace_listings(self._config(), "fake-api-key")
+
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertEqual({l.id for l in listings}, {"1", "2"})
+
+        first_url = mock_post.call_args_list[0].kwargs["json"]["input"][0]["url"]
+        second_url = mock_post.call_args_list[1].kwargs["json"]["input"][0]["url"]
+        self.assertIn("/vehicles", first_url)
+        self.assertIn("/search/", second_url)
+
+    def test_no_query_only_queries_category_url_once(self):
+        response = MagicMock(status_code=200)
+        response.text = ""
+        response.raise_for_status.return_value = None
+
+        cfg = {"search": {"location_id": "1", "category": "vehicles"}, "brightdata": {}}
+        with patch("brightdata_client.requests.post", return_value=response) as mock_post:
+            fetch_marketplace_listings(cfg, "fake-api-key")
+
+        self.assertEqual(mock_post.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

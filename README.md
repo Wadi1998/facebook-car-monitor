@@ -181,6 +181,15 @@ Facebook dans sa catégorie "Véhicules" et sont donc invisibles à la page de
 catégorie stricte, même pour un utilisateur connecté qui filtrerait par
 catégorie. La recherche par mot-clé les capture en plus.
 
+**Combinaison des deux sources** : quand `search.query` est configuré,
+`brightdata_client.fetch_marketplace_listings()` interroge **les deux URLs**
+à chaque cycle (catégorie **et** recherche mot-clé), puis fusionne les
+résultats — elles ne renvoient pas exactement les mêmes annonces. La
+déduplication existante (`storage.dedupe_listings`, par id) gère les
+recoupements entre les deux. **Coût doublé par cycle** (2 appels Bright Data
+au lieu d'1) en échange d'une meilleure couverture. Voir
+`apify_client.build_discovery_urls()`.
+
 **Contrepartie** : étant une recherche texte libre et non un filtre de
 catégorie strict, elle peut occasionnellement remonter des objets non liés
 aux véhicules (ex. observé réellement : un nettoyeur haute pression). C'est

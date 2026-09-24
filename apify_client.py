@@ -34,14 +34,32 @@ def _auth_headers(api_token: str) -> dict:
     return {"Authorization": f"Bearer {api_token}"}
 
 
+def build_category_url(search_config: dict) -> str:
+    """Build the Facebook Marketplace category *browse* page
+    (/marketplace/<id>/vehicles), ignoring search_config["query"] even if set.
+    Validated to work anonymously with both Apify and Bright Data.
+    """
+    location_id = search_config["location_id"]
+    category = search_config.get("category", "vehicles")
+    radius_km = search_config.get("radius_km", 150)
+    days_since_listed = search_config.get("days_since_listed", 1)
+    sort_by = search_config.get("sort_by", "creation_time_descend")
+    exact = search_config.get("exact", False)
+    return (
+        f"https://www.facebook.com/marketplace/{location_id}/{category}"
+        f"?daysSinceListed={days_since_listed}"
+        f"&radius={radius_km}"
+        f"&sortBy={sort_by}"
+        f"&exact={'true' if exact else 'false'}"
+    )
+
+
 def build_search_url(search_config: dict) -> str:
     """Build a Facebook Marketplace URL for the configured location.
 
     Two shapes, selected by whether search_config["query"] is set:
 
-    - No query (default): the category *browse* page
-      (/marketplace/<id>/vehicles). Validated to work anonymously with both
-      Apify and Bright Data.
+    - No query (default): the category *browse* page - see build_category_url().
     - With query: the /search page with a keyword (e.g. query="Véhicules"),
       optionally scoped further with category_id. This returns MORE listings
       than the plain category page (some listings aren't cleanly tagged into
@@ -61,36 +79,50 @@ def build_search_url(search_config: dict) -> str:
     if custom_url:
         return custom_url
 
+    query = search_config.get("query")
+    if not query:
+        return build_category_url(search_config)
+
+    from urllib.parse import quote
+
     location_id = search_config["location_id"]
     radius_km = search_config.get("radius_km", 150)
     days_since_listed = search_config.get("days_since_listed", 1)
     sort_by = search_config.get("sort_by", "creation_time_descend")
     exact = search_config.get("exact", False)
-    query = search_config.get("query")
 
-    if query:
-        from urllib.parse import quote
+    params = [
+        f"daysSinceListed={days_since_listed}",
+        f"sortBy={sort_by}",
+        f"query={quote(query)}",
+        f"exact={'true' if exact else 'false'}",
+        f"radius={radius_km}",
+    ]
+    category_id = search_config.get("category_id")
+    if category_id:
+        params.append(f"category_id={category_id}")
+    return f"https://www.facebook.com/marketplace/{location_id}/search/?" + "&".join(params)
 
-        params = [
-            f"daysSinceListed={days_since_listed}",
-            f"sortBy={sort_by}",
-            f"query={quote(query)}",
-            f"exact={'true' if exact else 'false'}",
-            f"radius={radius_km}",
-        ]
-        category_id = search_config.get("category_id")
-        if category_id:
-            params.append(f"category_id={category_id}")
-        return f"https://www.facebook.com/marketplace/{location_id}/search/?" + "&".join(params)
 
-    category = search_config.get("category", "vehicles")
-    return (
-        f"https://www.facebook.com/marketplace/{location_id}/{category}"
-        f"?daysSinceListed={days_since_listed}"
-        f"&radius={radius_km}"
-        f"&sortBy={sort_by}"
-        f"&exact={'true' if exact else 'false'}"
-    )
+def build_discovery_urls(search_config: dict) -> List[str]:
+    """URLs to query for a single scan. Normally a single URL (whatever
+    build_search_url() returns), but when search.query is set AND no
+    custom_url overrides everything, returns BOTH the category page and the
+    keyword search - they don't return identical listing sets (some listings
+    are only reachable one way), so combining them maximizes anonymous
+    coverage. Callers are expected to merge + dedupe the resulting listings
+    (main.py already deduplicates by id across a batch via
+    storage.dedupe_listings, so returning overlapping URLs here is safe).
+    """
+    if search_config.get("custom_url"):
+        return [build_search_url(search_config)]
+
+    category_url = build_category_url(search_config)
+    if not search_config.get("query"):
+        return [category_url]
+
+    search_url = build_search_url(search_config)
+    return [category_url, search_url] if search_url != category_url else [category_url]
 
 
 def fetch_marketplace_listings(config: dict, api_token: str) -> List[CarListing]:

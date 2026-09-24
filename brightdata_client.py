@@ -33,18 +33,34 @@ MARKETPLACE_DATASET_ID = "gd_lvt9iwuh6fbcwmx1a"
 
 
 def fetch_marketplace_listings(config: dict, api_key: str) -> List[CarListing]:
-    """Run a Bright Data Marketplace discovery request for our own Facebook
-    Marketplace category URL, and return the results as CarListing objects.
+    """Run Bright Data Marketplace discovery request(s) for our configured
+    Facebook Marketplace URL(s), and return the merged results as CarListing
+    objects.
+
+    When search.query is set (see apify_client.build_discovery_urls()), this
+    queries BOTH the category page and the keyword search and merges the
+    results, since they don't return identical listing sets. The caller
+    (main.py) already deduplicates the returned list by id, so any overlap
+    between the two URLs is harmless.
 
     Raises requests.RequestException / RuntimeError on API failures; callers
     are expected to catch these per monitoring cycle so one failed run does
     not stop the program (same contract as apify_client.fetch_marketplace_listings).
     """
-    from apify_client import build_search_url  # reuse the already-validated URL builder
+    from apify_client import build_discovery_urls  # reuse the already-validated URL builder(s)
 
     search_config = config["search"]
     brightdata_config = config.get("brightdata", {})
-    search_url = build_search_url(search_config)
+    urls = build_discovery_urls(search_config)
+
+    listings = []
+    for url in urls:
+        listings.extend(_fetch_listings_for_url(url, brightdata_config, api_key))
+    return listings
+
+
+def _fetch_listings_for_url(search_url: str, brightdata_config: dict, api_key: str) -> List[CarListing]:
+    """Run a single Bright Data discovery request against one Marketplace URL."""
     dataset_id = brightdata_config.get("dataset_id", MARKETPLACE_DATASET_ID)
     country = brightdata_config.get("country", "BE")
     timeout = brightdata_config.get("timeout_seconds", 180)

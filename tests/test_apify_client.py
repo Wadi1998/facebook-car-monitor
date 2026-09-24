@@ -1,7 +1,13 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from apify_client import build_search_url, fetch_marketplace_listings, get_last_run_cost_usd, parse_apify_listing
+from apify_client import (
+    build_discovery_urls,
+    build_search_url,
+    fetch_marketplace_listings,
+    get_last_run_cost_usd,
+    parse_apify_listing,
+)
 
 FAKE_TOKEN = "apify_api_SUPER-SECRET-TOKEN"
 
@@ -65,6 +71,29 @@ class TestBuildSearchUrl(unittest.TestCase):
     def test_no_query_uses_category_page_as_before(self):
         url = build_search_url({"location_id": "1", "query": ""})
         self.assertTrue(url.startswith("https://www.facebook.com/marketplace/1/vehicles"))
+
+
+class TestBuildDiscoveryUrls(unittest.TestCase):
+    """Used by brightdata_client to query both the category page and the
+    keyword search when search.query is set (they don't return identical
+    listing sets), while other callers (e.g. Apify, single-URL flows) keep
+    getting exactly one URL.
+    """
+
+    def test_no_query_returns_single_category_url(self):
+        urls = build_discovery_urls({"location_id": "1", "category": "vehicles"})
+        self.assertEqual(len(urls), 1)
+        self.assertIn("/vehicles", urls[0])
+
+    def test_query_returns_both_category_and_search_urls(self):
+        urls = build_discovery_urls({"location_id": "1", "category": "vehicles", "query": "Véhicules"})
+        self.assertEqual(len(urls), 2)
+        self.assertIn("/vehicles", urls[0])
+        self.assertIn("/search/", urls[1])
+
+    def test_custom_url_returns_single_url_only(self):
+        urls = build_discovery_urls({"custom_url": "https://example.com/custom", "query": "Véhicules"})
+        self.assertEqual(urls, ["https://example.com/custom"])
 
 
 class TestParseApifyListingDetailsOn(unittest.TestCase):
